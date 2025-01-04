@@ -1,0 +1,38 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/ubuntu/catkin_ws/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/home/ubuntu/catkin_ws/src/adi_driver/include/**",
+        "/home/ubuntu/catkin_ws/src/DynamixelSDK/ros/dynamixel_sdk/include/**",
+        "/home/ubuntu/catkin_ws/src/imu_tools/imu_complementary_filter/include/**",
+        "/home/ubuntu/catkin_ws/src/imu_tools/imu_filter_madgwick/include/**",
+        "/home/ubuntu/catkin_ws/src/md/include/**",
+        "/home/ubuntu/catkin_ws/src/robotis_manipulator/include/**",
+        "/home/ubuntu/catkin_ws/src/teleop_twist_joy/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_bullet/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_eigen/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_geometry_msgs/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_kdl/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_msgs/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_ros/include/**",
+        "/home/ubuntu/catkin_ws/src/geometry2-noetic-devel/tf2_sensor_msgs/include/**",
+        "/home/ubuntu/catkin_ws/src/turtlebot3/turtlebot3_slam/include/**",
+        "/home/ubuntu/catkin_ws/src/usb_cam/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-arm64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

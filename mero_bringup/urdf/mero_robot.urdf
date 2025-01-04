@@ -1,0 +1,238 @@
+<?xml version="1.0"?>
+<robot name="my_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Link to represent the base of the robot -->
+
+  <link name="dummy_link">
+    <visual>
+      <geometry>
+        <box size="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+  </link>
+  
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.3" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.44 0.44 0.44"/>
+      </geometry>
+      <material name="red">
+        <color rgba="1 0 0 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.3" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.44 0.44 0.44"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0.3" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="dummy_joint" type="fixed">
+    <parent link="dummy_link" />
+    <child link="base_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+
+  <!-- Joint to connect the base_link to the wheel -->
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel_link"/>
+    <origin xyz="0 0.27 0.085" rpy="-1.57 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel_link"/>
+    <origin xyz="0 -0.27 0.085" rpy="1.57 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  
+  <!-- Link to represent the left wheel -->
+  <link name="left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.1" radius="0.085"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.1" radius="0.085"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+  
+  <!-- Link to represent the right wheel -->
+  <link name="right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.1" radius="0.085"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.1" radius="0.085"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 -0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Joint to connect the base_link to the camera -->
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.32 0 0.33" rpy="0 0 1.57"/>
+  </joint>
+  
+  <!-- Link to represent the camera -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.2 0.05 0.05"/>
+      </geometry>
+      <material name="yellow">
+        <color rgba="1 1 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Joint to connect the base_link to the lidar -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0.282 0 0.44" rpy="0 0 3.14"/>
+  </joint>
+
+  <!-- Link to represent the lidar -->
+  <link name="lidar_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.05" radius="0.05"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0 1 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.5" radius="0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Joint to connect the base_link to the imu -->
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="-0.035 0 0.3" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Link to represent the imu -->
+  <link name="imu_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+      <material name="purple">
+        <color rgba="1 0 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <!-- Plugin to publish the lidar data
+  <gazebo>
+    <plugin name="gazebo_ros_laser" filename="libgazebo_ros_laser.so">
+      <topicName>/scan</topicName>
+      <frameName>lidar_link</frameName>
+    </plugin>
+  </gazebo> -->
+
+  <!-- Plugin to publish the imu data -->
+  <!-- <gazebo>
+    <plugin name="gazebo_ros_imu" filename="libgazebo_ros_imu.so">
+      <imuName>imu</imuName>
+      <topicName>/imu/data_raw</topicName>
+      <serviceName>/imu/set_bias</serviceName>
+      <updateRate>100</updateRate>
+      <frameName>imu_link</frameName>
+    </plugin>
+  </gazebo> -->
+
+  <!-- Plugin to publish the camera data -->
+  <!-- <gazebo>
+    <plugin name="gazebo_ros_camera" filename="libgazebo_ros_camera.so">
+      <cameraName>camera</cameraName>
+      <imageTopicName>/usb_cam/image_raw</imageTopicName>
+      <cameraInfoTopicName>/camera/camera_info</cameraInfoTopicName>
+      <frameName>camera_link</frameName>
+      <hackBaseline>0.07</hackBaseline>
+      <CxPrime>0.0</CxPrime>
+      <CyPrime>0.0</CyPrime>
+      <fPrime>700.0</fPrime>
+      <Cx>320.0</Cx>
+      <Cy>240.0</Cy>
+      <width>640</width>
+      <height>480</height>
+      <updateRate>30.0</updateRate>
+    </plugin>
+  </gazebo> -->
+
+</robot>
+
+
+

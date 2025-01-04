@@ -1,0 +1,3 @@
+<launch>
+  <node name="ssh_order" pkg="mero_bringup" type="ssh_order.py" output="screen"/>
+</launch>
