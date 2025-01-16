@@ -1,0 +1,167 @@
+import rospy        # rospy를 import하여 ROS 기반에서 파이썬을 사용가능하게 한다.
+import math         # 수학공식을 사용하기 위해 math를 import 한다.
+from math import pi 
+from sensor_msgs.msg import LaserScan       # lidar 센서 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+
+WALL_PERCEPTION = 1.0   # 벽을 인식하는 거리를 1.0으로 정의한다.
+LINEAR_VEL = 0.3                   # 선형 속도를 0.22m/s로 정의하는 구간으로, linear.x에 담겨 publish될 수치이다.
+ANGULAR_VEL = 0.3
+STOP_DISTANCE = 0.2                 # 정지 하기위한 거리를 나타내는 수치로, 0.2m로 정의한다.
+LIDAR_ERROR = 0.05                  # lidar에서 발생하는 오차를 0.05m로 설정한다.
+SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR        # lidar 데이터 오차를 대비하여 안전 정지 거리를 정의한다.
+
+class Obstacle():
+    def __init__(self):     # obstacle class를 정의한다.
+        self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)     # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self.obstacle()     # 생성자 함수를 호출한다.
+        
+    def get_scan(self):      # lidar data에서 direction에 따라 scan filter에 담을 데이터를 저장하고, 반환해주는 함수이다.
+        scan = rospy.wait_for_message('scan', LaserScan)    # subscriber를 설정해주는 구간으로, 토픽명과 메세지 타입을 설정한다.
+        scan_filter = []    # 빈 행렬을 정의한다.
+
+        scan_filter.extend(scan.ranges)  # scan_filter 행렬 끝에 scan 행렬의 0번에 해당하는 원소를 추가한다.
+
+        for i in range(len(scan_filter)):       # scan_filter의 원소 개수만큼 i를 1씩 증가하여 아래의 구문을 반복 실행한다.  
+            if scan_filter[i] == float('Inf'):  # 만약, 센서값이 infinity일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 3.5             # 해당 센서값을 최대값 3.5m로 설정한다.
+            elif math.isnan(scan_filter[i]):    # 만약, 센서값이 none 값일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 0               # 해당 센서값을 최소값 0m로 설정한다.
+
+        return scan_filter      # scan_filter 행렬을 반환한다.
+
+    def obstacle(self):         # lidar 센서값(물체와의 거리)으로 판단하고 행동하는 역할을 수행하는 함수이다.
+        twist = Twist()                 # Twist 형식의 메세지 변수를 정의한다.
+        wall_find = False         # 현재 turtlebot의 움직임 상태를 나타내는 변수로, 현재 움직임이 있다는 True로 정의한다.
+        wall_closest = 0
+        distances = []
+
+        while not rospy.is_shutdown():                      # ROS가 구동하는 동안 무한으로 구동하는 반복문이다.
+            distances.extend(self.get_scan())
+            odom_in = rospy.wait_for_message('odom',Odometry)
+            robot_heading=self.euler_from_quaternion(odom_in.pose.pose.orientation.x,odom_in.pose.pose.orientation.y,odom_in.pose.pose.orientation.z,odom_in.pose.pose.orientation.w)
+            rospy.loginfo("\nfront : %f\nleft: %f\nback: %f\nright: %f",distances[0], distances[90], distances[180], distances[270])
+            rospy.loginfo("find: %s, closest: %s", wall_find, wall_closest)
+            rospy.loginfo("heading %f", robot_heading/pi*180)
+            
+            if wall_find:
+                if distances[0] > WALL_PERCEPTION :
+                    twist.linear.x = LINEAR_VEL       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0   # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True           # turtlebot이 움직이고 있음을 정의한다.
+                else: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False
+                    wall_closest += 1
+             
+            elif wall_closest == 1: 
+                if robot_heading/pi*180 < 90: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 2:
+                if robot_heading/pi*180 > 0: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = -ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 3:
+                if robot_heading/pi*180 > -91: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = -ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 4:
+                if robot_heading/pi*180 > -177: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = -ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                    rospy.loginfo("\n 중간지점 달성")
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 5:
+                if robot_heading/pi*180 < -89: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 6:
+                if robot_heading/pi*180 < 0: 
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = True 
+            elif wall_closest == 7:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                    rospy.loginfo("\n 목표지점 달성")
+            else:
+                if distances[0] > WALL_PERCEPTION :
+                    twist.linear.x = LINEAR_VEL       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+                    wall_closest = 0
+                else:
+                    twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+                    twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+                    wall_closest += 1
+
+            distances.clear()
+            self._cmd_pub.publish(twist)        # 위에서 정의한 twist 메세지를 publish한다.
+
+    def euler_from_quaternion(self,x, y, z, w):
+        """
+        Convert a quaternion into euler angles (roll, pitch, yaw)
+        roll is rotation around x in radians (counterclockwise)
+        pitch is rotation around y in radians (counterclockwise)
+        yaw is rotation around z in radians (counterclockwise)
+        """
+        
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + y * y)
+        roll_x = math.atan2(t0, t1)
+     
+        t2 = +2.0 * (w * y - z * x)
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        pitch_y = math.asin(t2)
+     
+        t3 = +2.0 * (w * z + x * y)
+        t4 = +1.0 - 2.0 * (y * y + z * z)
+        yaw_z = math.atan2(t3, t4)
+     
+        return yaw_z # in radians
+
+    
+
+def main():     # 메인 구동문이다.
+    rospy.init_node('ROS_midterm')     # ROS 노드 'ROS_HW5_obstacle'을 초기화한다.
+    try:        # 예외를 처리하기 위한 구문이다.
+        obstacle = Obstacle()               # Obstacle 생성자를 호출한다.
+    except rospy.ROSInterruptException:     # 예외가 발생하면, except 구문이 실행된다.
+        pass    # 예외 처리를 하지 않고, 넘어가도록 하는 예약어이다.
+    rospy.spin()
+
+if __name__ == '__main__':      # 다른 코드에서 import되었을 시에는 실행되지 않고, 이 코드에서만 실행할 수 있도록 한다.
+    main()      # main 문을 구동한다.

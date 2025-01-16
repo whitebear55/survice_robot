@@ -1,0 +1,3 @@
+<launch>
+  <node name="launch_node" pkg="mero_bringup" type="launch_gui.py" output="screen"/>
+</launch>

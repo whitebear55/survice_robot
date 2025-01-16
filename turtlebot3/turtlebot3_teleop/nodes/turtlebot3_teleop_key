@@ -1,0 +1,202 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2011, Willow Garage, Inc.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#    * Neither the name of the Willow Garage, Inc. nor the names of its
+#      contributors may be used to endorse or promote products derived from
+#       this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import rospy                 # rospy를 import하여 ROS 기반에서 파이썬을 사용가능하게 한다.
+from geometry_msgs.msg import Twist     # Twist 형식의 geometric_msgs.msg를 사용하기 위한 import 문이다.
+import sys, select, os                  # sys, select, os 라이브러리를 import한다.
+if os.name == 'nt':          # 현재 운영 체제가 window인 경우, 아래의 구문을 실행한다.
+  import msvcrt, time        # msvcrt, time 라이브러리를 import한다
+else:                        # 현재 운영 체제가 window이 아닐 경우, 아래의 구문을 실행한다.
+  import tty, termios        # tty, termios 라이브러리를 import한다.
+
+BURGER_MAX_LIN_VEL = 0.22    # burger 모델의 최대 선형 속도를 0.22로 정의한다.
+BURGER_MAX_ANG_VEL = 2.84    # burger 모델의 최대 각속도를 2.84로 정의한다.
+
+WAFFLE_MAX_LIN_VEL = 0.26    # waffle 모델의 최대 선형 속도를 0.26로 정의한다.
+WAFFLE_MAX_ANG_VEL = 1.82    # waffle 모델의 최대 각속도를 1.82로 정의한다.
+
+LIN_VEL_STEP_SIZE = 0.01     # 선형 속도의 step size를 0.01로 정의한다.
+ANG_VEL_STEP_SIZE = 0.1      # 각속도의 step size를 0.1로 정의한다.
+
+msg = """                       
+Control Your TurtleBot3!
+---------------------------
+Moving around:
+        w
+   a    s    d
+        x
+
+w/x : increase/decrease linear velocity (Burger : ~ 0.22, Waffle and Waffle Pi : ~ 0.26)
+a/d : increase/decrease angular velocity (Burger : ~ 2.84, Waffle and Waffle Pi : ~ 1.82)
+
+space key, s : force stop
+
+CTRL-C to quit
+"""         # msg 내용을 정의한다. 
+
+e = """
+Communications Failed
+"""         # e 내용을 정의한다.
+
+def getKey():       # 키보드 입력을 받아오는 함수이다.
+    if os.name == 'nt':     # 현재 운영 체제가 window인 경우, 아래의 구문을 실행한다.
+        timeout = 0.1       # timeout을 0.1로 정의한다.
+        startTime = time.time()     # start time을 현재 시간을 초로 반환하여 정의한다.
+        while(1):           # 무한 반복문이다.
+            if msvcrt.kbhit():      # 만약 어떠한 키가 입력된 경우, 아래의 구문을 실행한다. 
+                if sys.version_info[0] >= 3:        # 파이썬 버전이 3이상인 경우, 아래의 구문을 실행한다.
+                    return msvcrt.getch().decode()  # 현재 눌린 키를 반환한다.
+                else:                               # 파이썬 버전이 3미만일 경우, 아래의 구문을 실행한다.
+                    return msvcrt.getch()           # 현재 눌린 키를 반환한다.
+            elif time.time() - startTime > timeout: # 현재 시간이 timeout을 경과하게 되면, 아래의 구문을 실행한다.
+                return ''       # 빈 문자열을 반환한다.
+
+    tty.setraw(sys.stdin.fileno())      # 터미널에서 입력한 문자를 읽을 수 있도록 raw모드로 설정한다.
+    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)   # 데이터를 읽을 수 있는지를 확인하는 구문이다.
+    if rlist:       # 현재 데이터를 읽을 수 있는 경우, 아래의 구문을 실행한다.
+        key = sys.stdin.read(1)     # 사용자가 키를 누를 때까지 대기하다 키를 누르면 해당 키에 해당한다 문자열을 반환한다.
+    else:           # 데이터를 읽을 수 없는 경우, 아래의 구문을 실행한다.
+        key = ''    # 빈 문자열을 정의한다.
+
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)   # 터미널 모드들 이전 상태로 복원하는 함수이다.
+    return key      # key를 반환한다.
+
+def vels(target_linear_vel, target_angular_vel):        # 선형 속도와 각속도를 지정한 범위 내로 변환하여 반환하는 함수이다.
+    return "currently:\tlinear vel %s\t angular vel %s " % (target_linear_vel,target_angular_vel)   # 변환된 속도를 반환한다.
+
+def makeSimpleProfile(output, input, slop):     # 제어와 관련된 함수로 input을 output값으로 점진적으로 변화하는 함수이다.
+    if input > output:          # 만약 input이 output보다 클 경우, 아래의 구문을 실행한다.
+        output = min( input, output + slop )    # input과 output에 slot을 더한 값 중 최솟값을 output으로 정의한다.
+    elif input < output:        # 만약 input이 output보다 작을 경우, 아래의 구문을 실행한다.
+        output = max( input, output - slop )    # input과 output에 slot을 뺀 값 중 최댓값을 output으로 정의한다.
+    else:   # 둘다 그렇지 않다면, 아래의 구문을 실행한다.
+        output = input          # input을 output으로 정의한다.
+
+    return output       # output을 반환한다.
+
+def constrain(input, low, high):    # input을 정해진 범위로 제한하는 함수이다.
+    if input < low:     # input이 low보다 작을 경우, 아래의 구문을 실행한다.
+      input = low       # input을 low로 정의한다.
+    elif input > high:  # input이 high보다 클 경우, 아래의 구문을 실행한다.
+      input = high      # input을 high로 정의한다.
+    else:               # 둘다 그렇지 않은 경우, 아래의 구문을 실행한다.
+      input = input     # input을 변환하지 않는다.
+
+    return input        # input을 반환한다.
+
+def checkLinearLimitVelocity(vel):  # 현재 주어진 속도가 로봇의 모델에게 맞는 속도 범위에 있는지 확인하는 함수이다.
+    if turtlebot3_model == "burger":    # 만약 로봇의 모델이 burger이면, 아래의 구문을 실행한다.
+      vel = constrain(vel, -BURGER_MAX_LIN_VEL, BURGER_MAX_LIN_VEL)         # vel을 burger의 최소 속도와 최대 속도 사이의 값으로 제한한다.
+    elif turtlebot3_model == "waffle" or turtlebot3_model == "waffle_pi":   # 만약 로봇의 모델이 waffle이나 waffle_pi일 경우, 아래의 구문을 실행한다.
+      vel = constrain(vel, -WAFFLE_MAX_LIN_VEL, WAFFLE_MAX_LIN_VEL)         # vel을 waffle의 최소 속도와 최대 속도 사이의 값으로 제한한다.
+    else:   # 둘다 그렇지 않다면, 아래의 구문을 실행한다.
+      vel = constrain(vel, -BURGER_MAX_LIN_VEL, BURGER_MAX_LIN_VEL)         # vel을 burger의 최소 속도와 최대 속도 사이의 값으로 제한한다.
+
+    return vel      # vel을 반환한다.
+
+def checkAngularLimitVelocity(vel):     # 현재 주어진 각속도가 로봇의 모델에게 맞는 속도 범위에 있는지 확인하는 함수이다.
+    if turtlebot3_model == "burger":    # 만약 로봇의 모델이 burger이면, 아래의 구문을 실행한다.
+      vel = constrain(vel, -BURGER_MAX_ANG_VEL, BURGER_MAX_ANG_VEL)         # vel을 burger의 최소 각속도와 최대 각속도 사이의 값으로 제한한다.
+    elif turtlebot3_model == "waffle" or turtlebot3_model == "waffle_pi":   # 만약 로봇의 모델이 waffle이나 waffle_pi일 경우, 아래의 구문을 실행한다.
+      vel = constrain(vel, -WAFFLE_MAX_ANG_VEL, WAFFLE_MAX_ANG_VEL)         # vel을 waffle의 최소 각속도와 최대 각속도 사이의 값으로 제한한다.
+    else:   # 둘다 그렇지 않다면, 아래의 구문을 실행한다.
+      vel = constrain(vel, -BURGER_MAX_ANG_VEL, BURGER_MAX_ANG_VEL)         # vel을 burger의 최소 각속도와 최대 각속도 사이의 값으로 제한한다.
+
+    return vel      # vel을 반환한다.
+
+if __name__=="__main__":    # 다른 코드에서 import되었을 시에는 실행되지 않고, 이 코드에서만 실행할 수 있도록 한다.
+    if os.name != 'nt':     # 현재 운영 체제가 window인 경우, 아래의 구문을 실행한다.
+        settings = termios.tcgetattr(sys.stdin)     # settings에 sys의 stdin의 속성을 정의한다. 
+
+    rospy.init_node('turtlebot3_teleop')            # ROS 노드 'turtlebot3_teleop'을 초기화한다.
+    pub = rospy.Publisher('cmd_vel', Twist, queue_size=10)      # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+
+    turtlebot3_model = rospy.get_param("model", "burger")       # 'model'파라미터를 가져와 turtlebot3_model에 저장한다. 
+
+    status = 0                      # status를 0으로 초기화한다.
+    target_linear_vel   = 0.0       # target의 선형 속도를 0.0으로 초기화한다.
+    target_angular_vel  = 0.0       # target의 각속도를 0.0으로 초기화한다.
+    control_linear_vel  = 0.0       # control 하는 선형 속도를 0.0으로 초기화한다.
+    control_angular_vel = 0.0       # control 하는 각속도를 0.0으로 초기화한다.
+
+    try:                            # 예외를 처리하기 위한 구문이다. 
+        print(msg)                  # 터미널에 msg 내용을 출력한다.
+        while not rospy.is_shutdown():      # ROS가 구동하는 동안 무한으로 구동하는 반복문이다.
+            key = getKey()          # key에 현재 입력되는 키를 반환받아 정의한다.
+            if key == 'w' :         # 만약 'w'키가 입력될 경우, 아래의 구문을 실행한다.
+                target_linear_vel = checkLinearLimitVelocity(target_linear_vel + LIN_VEL_STEP_SIZE)     # 새로 입력된 선형 속도가 속도 범위에 있는지 확인한다.
+                status = status + 1     # status를 1 증가하여 저장한다.
+                print(vels(target_linear_vel,target_angular_vel))       # 터미널에 현재 선형 속도와 각속도를 출력한다.
+            elif key == 'x' :       # 만약 'x'키가 입력될 경우, 아래의 구문을 실행한다.
+                target_linear_vel = checkLinearLimitVelocity(target_linear_vel - LIN_VEL_STEP_SIZE)     # 새로 입력된 선형 속도가 속도 범위에 있는지 확인한다.
+                status = status + 1      # status를 1 증가하여 저장한다.
+                print(vels(target_linear_vel,target_angular_vel))       # 터미널에 현재 선형 속도와 각속도를 출력한다.
+            elif key == 'a' :       # 만약 'a'키가 입력될 경우, 아래의 구문을 실행한다.
+                target_angular_vel = checkAngularLimitVelocity(target_angular_vel + ANG_VEL_STEP_SIZE)  # 새로 입력된 각속도가 속도 범위에 있는지 확인한다.
+                status = status + 1      # status를 1 증가하여 저장한다.
+                print(vels(target_linear_vel,target_angular_vel))       # 터미널에 현재 선형 속도와 각속도를 출력한다.
+            elif key == 'd' :       # 만약 'd'키가 입력될 경우, 아래의 구문을 실행한다.
+                target_angular_vel = checkAngularLimitVelocity(target_angular_vel - ANG_VEL_STEP_SIZE)  # 새로 입력된 각속도가 속도 범위에 있는지 확인한다.
+                status = status + 1      # status를 1 증가하여 저장한다.
+                print(vels(target_linear_vel,target_angular_vel))       # 터미널에 현재 선형 속도와 각속도를 출력한다.
+            elif key == ' ' or key == 's' :     # 만약 's'키나 ' '이 입력될 경우, 아래의 구문을 실행한다.
+                target_linear_vel   = 0.0       # target의 선형 속도를 0.0으로 초기화한다.
+                control_linear_vel  = 0.0       # control 하는 선형 속도를 0.0으로 초기화한다.
+                target_angular_vel  = 0.0       # target의 각속도를 0.0으로 초기화한다.
+                control_angular_vel = 0.0       # control 하는 각속도를 0.0으로 초기화한다.
+                print(vels(target_linear_vel, target_angular_vel))      # 터미널에 현재 선형 속도와 각속도를 출력한다.
+            else:                       # 그렇지 않다면, 아래의 구문을 실행한다.
+                if (key == '\x03'):     # 만약 사용자가 'ctrl + c'키를 입력한 경우, 아래의 구문을 실행한다.
+                    break               # 해당 루프를 탈출한다.
+
+            if status == 20 :           # 만약 status가 20이 된다면, 아래의 구문을 실행한다.
+                print(msg)              # 터미널에 msg 내용을 출력한다.
+                status = 0              # status를 0으로 초기화한다.
+
+            twist = Twist()             # Twist 형식의 메세지 변수를 정의한다.
+
+            control_linear_vel = makeSimpleProfile(control_linear_vel, target_linear_vel, (LIN_VEL_STEP_SIZE/2.0))      # 입력된 선형 속도를 급격한 변화 없이 부드럽게 조정한다.
+            twist.linear.x = control_linear_vel; twist.linear.y = 0.0; twist.linear.z = 0.0         # 조정된 선형 속도를 x축 선형 속도에 정의하고, y축, z축 선형 속도는 0.0으로 정의한다.
+
+            control_angular_vel = makeSimpleProfile(control_angular_vel, target_angular_vel, (ANG_VEL_STEP_SIZE/2.0))   # 입력된 각속도를 급격한 변화 없이 부드럽게 조정한다.
+            twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = control_angular_vel     # 조정된 각속도를 z축 각속도에 정의하고, x축, y축 각속도는 0.0으로 정의한다.
+
+            pub.publish(twist)          # 정의된 twist 메세지를 publish한다.
+
+    except:         # 예외가 발생하면, except 구문이 실행된다.
+        print(e)    # 터미널에 e 내용을 출력한다.
+
+    finally:        # 예외 발생과 상관없이, 무조건 아래의 구문이 실행된다.
+        twist = Twist()     # Twist 형식의 메세지 변수를 정의한다.
+        twist.linear.x = 0.0; twist.linear.y = 0.0; twist.linear.z = 0.0        # x축, y축, z축 선형 속도를 0.0으로 정의한다.
+        twist.angular.x = 0.0; twist.angular.y = 0.0; twist.angular.z = 0.0     # x축, y축, z축 각속도를 0.0으로 정의한다.
+        pub.publish(twist)  # 정의된 twist 메세지를 publish한다.
+
+    if os.name != 'nt':     # 현재 운영 체제가 window인 경우, 아래의 구문을 실행한다.
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)       # 변경된 터미널 설정을 되돌려놓는 역할을 하는 구문이다.

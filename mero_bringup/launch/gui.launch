@@ -1,0 +1,7 @@
+<launch>
+  <arg name="image_path" default="/home/ubuntu/catkin_ws/src/mero_bringup/nodes"/>  <!-- 이미지 경로를 받아오는 인자 -->
+
+  <node name="gui_node" pkg="mero_bringup" type="gui_test.py" output="screen">
+    <param name="image_path" value="$(arg image_path)"/>  <!-- 이미지 경로 파라미터로 전달 -->
+  </node>
+</launch>

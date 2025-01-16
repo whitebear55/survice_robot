@@ -1,0 +1,133 @@
+import rospy        # rospy를 import하여 ROS 기반에서 파이썬을 사용가능하게 한다.
+import math         # 수학공식을 사용하기 위해 math를 import한다.
+import time         # delay를 사용하기 위해 time을 import한다.
+from math import pi                         # pi를 사용하기 위해 math 라이브러리에서 pi를 import한다.
+from sensor_msgs.msg import LaserScan       # lidar 센서 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+from geometry_msgs.msg import Twist         # 구동 명령 데이터를 publish하기 위해 메세지 형식과 패키지를 import한다.
+from std_msgs.msg import String             # 카메라 색상 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+
+WALL_PERCEPTION = 0.4               # 벽을 인식하는 거리를 1.0으로 정의한다.
+LINEAR_VEL = 0.12                   # 선형 속도를 0.22m/s로 정의하는 구간으로, linear.x에 담겨 publish될 수치이다.
+ANGULAR_VEL = 0.3                   # 회전 각속도를 0.3rad/s로 정의한다.
+FORNT_NUM = 0                       # 0 0 정면 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM = 90                       # 59 90 좌측면 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM = 270                     # 176 270 우측면 Lidar 값을 저장하기 위해 정의된 변수이다.
+BACK_NUM = 180                      # 118 180 후면 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM_1 = 255                   # 166 255 우측 후방 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM_2 = 285                   # 186 285 우측 전방 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM_1 = 105                     # 69 105 좌측 후방 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM_2 = 75                     # 49 75 좌측 전방 Lidar 값을 저장하기 위해 정의된 변수이다.
+SLEEP = 3                           # delay 시간을 정의한다.
+
+class Obstacle():
+    def __init__(self):     # obstacle class를 정의한다.
+        self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)     # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self.obstacle()     # 생성자 함수를 호출한다.
+        
+    def get_scan(self):      # lidar data에서 direction에 따라 scan filter에 담을 데이터를 저장하고, 반환해주는 함수이다.
+        scan = rospy.wait_for_message('scan', LaserScan)    # subscriber를 설정해주는 구간으로, 토픽명과 메세지 타입을 설정한다.
+        scan_filter = []    # 빈 행렬을 정의한다.
+        scan_filter.extend(scan.ranges)  # scan_filter 행렬 끝에 scan 행렬의 0번에 해당하는 원소를 추가한다.
+
+        for i in range(len(scan_filter)):       # scan_filter의 원소 개수만큼 i를 1씩 증가하여 아래의 구문을 반복 실행한다.  
+            if scan_filter[i] == float('Inf'):  # 만약, 센서값이 infinity일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 3.5             # 해당 센서값을 최대값 3.5m로 설정한다.
+            elif math.isnan(scan_filter[i]):    # 만약, 센서값이 none 값일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 0               # 해당 센서값을 최소값 0m로 설정한다.
+
+        return scan_filter      # scan_filter 행렬을 반환한다.
+    
+    def pub_cmd(self, Linear, Angle):   # cmd vel 토픽을 publish 해주는 함수이다.
+        twist = Twist()
+        twist.linear.x = Linear      # x축 선형 속도를 정의한 속도로 정의한다.
+        twist.angular.z = Angle      # z축 각속도를 정의한 각속도로 정의한다.
+        self._cmd_pub.publish(twist) # 위에서 정의한 twist 메세지를 publish한다.
+
+    def get_color(self):             # color를 subscribe해주는 함수이다.
+        color_sub = rospy.wait_for_message('color_pub', String) # subscribe를 정의하는 구간으로, 메세지 토픽과 메세지 형식을 정의한다.
+        detect_color = color_sub.data   # 메세지 데이터를 저장한다.
+
+        return detect_color # 저장한 데이터를 반환한다.
+
+    def obstacle(self):         # lidar 센서값(물체와의 거리)으로 판단하고 행동하는 역할을 수행하는 함수이다.
+        right_wall_closest = False       # 현재 turtlebot의 움직임 상태를 나타내는 변수로, 현재 움직임이 있다는 True로 정의한다.
+        wall_pallel = True               # 벽과 평형상태를 유지하고 있는지 확인한기 위한 변수이다.
+        turn = " "                       # 현재 회전 방향을 나타내는 변수이다.
+        distances = []                   # 거리값을 저장하기 위해 빈행렬을 정의한다.
+
+        while not rospy.is_shutdown():                      # ROS가 구동하는 동안 무한으로 구동하는 반복문이다.
+            distances.extend(self.get_scan())               # 거리값을 subscribe한 데이터로 저장한다.
+            color = self.get_color()                        # color를 subscribe한 데이터로 저장한다.
+
+            rospy.loginfo("\n\n                front : %f\n\nleft: %f                    right: %f\n\n                back  : %f\n",distances[FORNT_NUM], distances[LEFT_NUM], distances[RIGHT_NUM], distances[BACK_NUM])
+            rospy.loginfo("\nclosest: %s, color: %s, pallel: %s turn: %s", right_wall_closest, color, wall_pallel, turn)
+            
+            if (wall_pallel):                           # 만약, wall_pallel이 true이면 아래의 구문을 실행한다.
+                if (right_wall_closest):                # 만약, right_wall_closest가 true이면 아래의 구문을 실행한다.
+                    if color == "red":                  # 만약, color가 "red"이면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,ANGULAR_VEL)       # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                        time.sleep(SLEEP)                   # 정의한 시간만큼 딜레이를 준다.
+                        right_wall_closest = False          # right wall closest 변수를 false로 정의한다.
+                        wall_pallel = False                 # wall parallel 변수를 false로 정의한다.
+                        turn = "Left"                       # turn을 "Left"로 정의한다.
+                    elif color == "green":              # 만약, color가 "green"이면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,-ANGULAR_VEL)      # 정지 상태에서 왼쪽으로 회전하는 명령을 publish한다.
+                        time.sleep(SLEEP)                   # 정의한 시간만큼 딜레이를 준다.
+                        right_wall_closest = False          # right wall closest 변수를 false로 정의한다.
+                        wall_pallel = False                 # wall parallel 변수를 false로 정의한다.
+                        turn = "Right"                      # turn을 "Left"로 정의한다.
+                    elif color == "blue":               # 만약, color가 "blue"이면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,-ANGULAR_VEL)      # 정지 상태에서 왼쪽으로 회전하는 명령을 publish한다.
+                        time.sleep(SLEEP)                   # 정의한 시간만큼 딜레이를 준다.
+                        right_wall_closest = False          # right wall closest 변수를 false로 정의한다.
+                        wall_pallel = False                 # wall parallel 변수를 false로 정의한다.
+                        turn = "Right"                      # turn을 "Right"로 정의한다.
+                    elif color == "none":               # 만약, color가 "none"이면 아래의 구문을 실행한다.
+                        if distances[LEFT_NUM] < distances[RIGHT_NUM]:  # 만약, 왼쪽 거리값이 오른쪽 거리값보다 작다면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,-ANGULAR_VEL)      # 정지 상태에서 왼쪽으로 회전하는 명령을 publish한다.
+                            time.sleep(SLEEP)                   # 정의한 시간만큼 딜레이를 준다.
+                            right_wall_closest = False          # right wall closest 변수를 false로 정의한다.
+                            wall_pallel = False                 # wall parallel 변수를 false로 정의한다.
+                            turn = "Right"                      # turn을 "Right"로 정의한다.
+                        else:                           # 그렇지 않다면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,ANGULAR_VEL)       # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.    
+                            time.sleep(SLEEP)                   # 정의한 시간만큼 딜레이를 준다.
+                            right_wall_closest = False          # right wall closest 변수를 false로 정의한다.
+                            wall_pallel = False                 # wall parallel 변수를 false로 정의한다.
+                            turn = "Left"                       # turn을 "Left"로 정의한다.
+                else:
+                    if distances[FORNT_NUM] > WALL_PERCEPTION:      # 정면 거리값이 벽으로 인식하는 거리보다 클 경우 아래의 구문을 실행한다.
+                        if abs(distances[RIGHT_NUM_1] - distances[RIGHT_NUM_2]) > 0.3:  # 만약, 우측 후방- 우측 전방 거리값의 절댓값이 0.2보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,0.0)                                    # 정의한 선형 속도를 publish한다.
+                        else:                                                           # 그렇지 않다면, 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,(distances[RIGHT_NUM_1]-distances[RIGHT_NUM_2])*2.0 + (WALL_PERCEPTION-distances[RIGHT_NUM])*0.5)
+                                                                                            # 벽면을 따라가며 직진 주행하는 명령을 publish한다.
+                    else:                                           # 그렇지 않다면, 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,0.0)                           # 정지 상태를 publish한다.
+                        right_wall_closest = True                       # right_wall_closest 변수를 True로 정의한다.
+            else:       # 그렇지 않다면, 아래의 구문을 실행한다.
+                if turn == "Left":      # 만약, turn이 "Left"라면 아래의 구문을 실행한다.
+                    if (distances[RIGHT_NUM_2] >= distances[RIGHT_NUM_1]):  # 우측 전방 거리값이 우측 후방 거리값보다 크거나 같다면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,0.0)                                   # 정지 상태를 publish한다.
+                        wall_pallel = True                                      # wall parallel 변수를 true로 정의한다.
+                    else:                                                   # 그렇지 않다면, 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,(distances[RIGHT_NUM_1]-distances[RIGHT_NUM_2])*1.0)   # 우측 후방 - 우측 전방 거리값을 angular 변수로 저장하고 publish한다.
+                elif turn == "Right":   # 만약, turn이 "Right"라면 아래의 구문을 실행한다.
+                    if (distances[LEFT_NUM_2] >= distances[LEFT_NUM_1]):    # 좌측 전방 거리값이 좌측 후방 거리값보다 크거나 같다면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,0.0)                                   # 정지 상태를 publish한다.
+                        wall_pallel = True                                      # wall parallel 변수를 true로 정의한다.
+                    else:                                                   # 그렇지 않다면, 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,(distances[LEFT_NUM_2]-distances[LEFT_NUM_1])*1.0)     # 좌측 후방 - 좌측 전방 거리값을 angular 변수로 저장하고 publish한다.
+            distances.clear()   # 거리값 행렬을 초기화한다.
+
+def main():     # 메인 구동문이다.
+    rospy.init_node('ROS_HW9_camera_path')     # ROS 노드 'ROS_HW9_camera_path'을 초기화한다.
+    try:        # 예외를 처리하기 위한 구문이다.
+        obstacle = Obstacle()               # Obstacle 생성자를 호출한다.
+    except rospy.ROSInterruptException:     # 예외가 발생하면, except 구문이 실행된다.
+        pass    # 예외 처리를 하지 않고, 넘어가도록 하는 예약어이다.
+
+if __name__ == '__main__':      # 다른 코드에서 import되었을 시에는 실행되지 않고, 이 코드에서만 실행할 수 있도록 한다.
+    main()      # main 문을 구동한다.
+
+

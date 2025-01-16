@@ -1,0 +1,96 @@
+#!/usr/bin/env python
+#################################################################################
+# Copyright 2018 ROBOTIS CO., LTD.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#################################################################################
+
+# Authors: Gilbert #
+
+import rospy                        # rospy를 import하여 ROS 기반에서 파이썬을 사용가능하게 한다.
+import math                         # 수학공식을 사용하기 위해 math를 import 한다.
+from sensor_msgs.msg import LaserScan   # lidar 센서 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+from geometry_msgs.msg import Twist
+
+LINEAR_VEL = 0.22                   # 선형 속도를 0.22m/s로 정의하는 구간으로, linear.x에 담겨 publish될 수치이다.
+STOP_DISTANCE = 0.2                 # 정지 하기위한 거리를 나타내는 수치로, 0.2m로 정의한다.
+LIDAR_ERROR = 0.05                  # lidar에서 발생하는 오차를 0.05m로 설정한다.
+SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR        # lidar 데이터 오차를 대비하여 안전 정지 거리를 정의한다.
+
+class Obstacle():           # obstacle class를 정의한다.
+    def __init__(self):     # initialize를 위한 함수이다.
+        self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)     # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self.obstacle()     # 생성자 함수를 호출한다.
+        
+    def get_scan(self):     # lidar data에서 scan filter에 담을 데이터를 저장하고, 반환해주는 함수이다.
+        scan = rospy.wait_for_message('scan', LaserScan)        # subscriber를 설정해주는 구간으로, 토픽명과 메세지 타입을 설정한다.
+        scan_filter = []    # 빈 행렬을 정의한다.
+       
+        samples = len(scan.ranges)  # The number of samples is defined in       # lidat data의 총 길이(원소 개수)를 samples로 정의한다.
+                                    # turtlebot3_<model>.gazebo.xacro file,
+                                    # the default is 360.
+        samples_view = 1            # 1 <= samples_view <= samples              # 반환해줄 데이터를 저장할 때 사용할 sample 수를 1로 정의한다.
+
+        if samples_view > samples:      # samples_view가 samples 보다 큰 경우에 아래의 구문을 실행한다.
+            samples_view = samples      # 이러한 경우는 없어야하기 때문에 sample로 최댓값을 설정한다. 
+
+        if samples_view is 1:           # samples_view가 1일 경우, 아래의 구문을 실행한다.
+            scan_filter.append(scan.ranges[0])      # scan_filter 행렬 맨 뒤에 scan.ranges의 0번째 원소를 추가한다.
+
+        else:                           # samples_view가 1이 아닐 경우, 아래의 구문을 실행한다.
+            left_lidar_samples_ranges = -(samples_view//2 + samples_view % 2)       # lidar 왼쪽 data를 sample_view의 절반에 해당하는 범위로 정의한다.
+            right_lidar_samples_ranges = samples_view//2      # lidar 오른쪽 data를 나머지 절반에 해당하는 범위로 정의한다. ('//': 몫 연산자, '%':나머지 연산자)
+            
+            left_lidar_samples = scan.ranges[left_lidar_samples_ranges:]            # left_lidar_samples에 정의된 범위에 해당하는 센서값을 저장한다.
+            right_lidar_samples = scan.ranges[:right_lidar_samples_ranges]          # right_lidar_samples에 정의된 범위에 해당하는 센서값을 저장한다.
+            scan_filter.extend(left_lidar_samples + right_lidar_samples)            # 행렬로 정의된 왼쪽 오른쪽 lidar data를 scan.filter 행렬 마지막에 원소 하나씩 추가한다. 
+
+        for i in range(samples_view):   # samples_view의 범위만큼 i를 증가시켜 아래의 반복문을 실행한다.
+            if scan_filter[i] == float('Inf'):      # 만약, 센서값이 infinity일 경우, 아래의 구문을 실행한다.
+                scan_filter[i] = 3.5                # 해당 센서값을 최대값 3.5m로 설정한다.
+            elif math.isnan(scan_filter[i]):        # 만약, 센서값이 none값일 경우, 아래의 구문을 실행한다.
+                scan_filter[i] = 0                  # 해당 센서값을 최소값 0m로 설정한다.
+        
+        return scan_filter              # scan_filter 행렬을 반환한다.
+
+    def obstacle(self):                 # lidar 센서값(물체와의 거리)으로 판단하고 행동하는 역할을 수행하는 함수이다.
+        twist = Twist()                 # Twist 형식의 메세지 변수를 정의한다.
+        turtlebot_moving = True         # 현재 turtlebot의 움직임 상태를 나타내는 변수로, 현재 움직임이 있다는 True로 정의한다.
+
+        while not rospy.is_shutdown():              # ROS가 구동하는 동안 무한으로 구동하는 반복문이다.
+            lidar_distances = self.get_scan()       # lidar_distances에 scan.filter 행렬을 반환받아 정의한다.
+            min_distance = min(lidar_distances)     # 정의한 lidar_distances 행렬에서 최솟값을 정의한다.
+
+            if min_distance < SAFE_STOP_DISTANCE:   # 만약 최솟값이 안전 정지 거리보다 작을 경우, 아래의 구문을 실행한다.
+                if turtlebot_moving:                # 만약 turtlebot이 움직이고 있을 경우, 아래의 구문을 실행한다.
+                    twist.linear.x = 0.0            # x축 선형 속도를 0.0으로 정의한다.
+                    twist.angular.z = 0.0           # z축 각속도를 0.0으로 정의한다.
+                    self._cmd_pub.publish(twist)    # 위에서 정의 twist 메세지를 publish한다.
+                    turtlebot_moving = False        # turtlebot이 정지했음을 정의한다.
+                    rospy.loginfo('Stop!')          # 터미널에 'Stop!'구문을 출력한다.
+            else:           # 만약 최솟값이 안전 정지 거리보다 작지 않을 경우, 아래의 구문을 실행한다.
+                twist.linear.x = LINEAR_VEL         # x축 선형 속도를 정의한 속도로 정의한다.
+                twist.angular.z = 0.0               # z축 각속도를 0.0으로 정의한다.
+                self._cmd_pub.publish(twist)        # 위에서 정의한 twist 메세지를 publish한다.
+                turtlebot_moving = True             # turtlebot이 움직이고 있음을 정의한다.
+                rospy.loginfo('Distance of the obstacle : %f', min_distance)        # 터미널에 물체와의 거리로 최솟값을 출력한다.
+
+def main():         # 메인 구동문이다.
+    rospy.init_node('turtlebot3_obstacle')      # ROS 노드 'turtlebot3_obstacle'을 초기화한다.
+    try:            # 예외를 처리하기 위한 구문이다. 
+        obstacle = Obstacle()                   # Obstacle 생성자를 호출한다.
+    except rospy.ROSInterruptException:         # 예외가 발생하면, except 구문이 실행된다.
+        pass        # 예외 처리를 하지 않고, 넘어가도록 하는 예약어이다.
+
+if __name__ == '__main__':          # 다른 코드에서 import되었을 시에는 실행되지 않고, 이 코드에서만 실행할 수 있도록 한다.
+    main()      # main 문을 구동한다.

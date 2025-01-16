@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+import rospy # Python library for ROS
+from sensor_msgs.msg import LaserScan # LaserScan type message is defined in sensor_msgs
+from geometry_msgs.msg import Twist #
+
+WALL_PERCEPTION = 0.3    # 벽을 인식하는 거리를 1.0으로 정의한다.
+LINEAR_VEL = 0.12                   # 선형 속도를 0.22m/s로 정의하는 구간으로, linear.x에 담겨 publish될 수치이다.
+ANGULAR_VEL = 0.3
+STOP_DISTANCE = 0.2                 # 정지 하기위한 거리를 나타내는 수치로, 0.2m로 정의한다.
+LIDAR_ERROR = 0.05                  # lidar에서 발생하는 오차를 0.05m로 설정한다.
+SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR        # lidar 데이터 오차를 대비하여 안전 정지 거리를 정의한다.
+
+left_wall_find = False
+left_wall_closest = False
+
+def callback(scan):
+    global left_wall_find          
+    global left_wall_closest 
+    if left_wall_find:
+        if scan[0] > WALL_PERCEPTION :
+            twist.linear.x = LINEAR_VEL       # x축 선형 속도를 정의한 속도로 정의한다.
+            twist.angular.z = (scan.ranges[255]-scan.ranges[285]) * 2.0         # z축 각속도를 0.0으로 정의한다.
+            left_wall_find = True           # turtlebot이 움직이고 있음을 정의한다.
+        else:
+            twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+            twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+            left_wall_find = False    
+    elif left_wall_closest: 
+        if scan.ranges[285] <= scan.ranges[255]: 
+            twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+            twist.angular.z = ANGULAR_VEL        # z축 각속도를 0.0으로 정의한다.
+            left_wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+        else:
+            left_wall_find = True 
+    else:
+        if scan.ranges[0] > WALL_PERCEPTION :
+            twist.linear.x = LINEAR_VEL       # x축 선형 속도를 정의한 속도로 정의한다.
+            twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+            left_wall_find = False           # turtlebot이 움직이고 있음을 정의한다.
+            left_wall_closest = False
+        else:
+            twist.linear.x = 0.0       # x축 선형 속도를 정의한 속도로 정의한다.
+            twist.angular.z = 0.0        # z축 각속도를 0.0으로 정의한다.
+            left_wall_closest = True
+    pub.publish(twist)        # 위에서 정의한 twist 메세지를 publish한다.
+    rospy.loginfo("\nfront : %f\nleft: %f\nback: %f\nright: %f",scan.ranges[0], scan.ranges[90], scan.ranges[255], scan.ranges[285])
+    rospy.loginfo("find: %s, closest: %s", left_wall_find, left_wall_closest)
+
+twist = Twist()                 # Twist 형식의 메세지 변수를 정의한다.
+rospy.init_node('obstacle_avoidance_node') # Initializes a node
+pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)  # Publisher object which will publish "Twist" type messages
+                            				 # on the "/cmd_vel" Topic, "queue_size" is the size of the
+                                                         # outgoing message queue used for asynchronous publishing
+
+sub = rospy.Subscriber("/scan", LaserScan, callback)  # Subscriber object which will listen "LaserScan" type messages
+                                                      # from the "/scan" Topic and call the "callback" function
+						      # each time it reads something from the Topic
+
+rospy.spin() # Loops infinitely until someone stops the program execution
+

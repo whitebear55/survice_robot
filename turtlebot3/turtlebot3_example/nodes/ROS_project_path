@@ -1,0 +1,322 @@
+
+import rospy        # rospy를 import하여 ROS 기반에서 파이썬을 사용가능하게 한다.
+import math         # 수학공식을 사용하기 위해 math를 import한다.
+import time         # delay를 사용하기 위해 time을 import한다.
+from math import pi                         # pi를 사용하기 위해 math 라이브러리에서 pi를 import한다.
+from sensor_msgs.msg import LaserScan       # lidar 센서 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+from geometry_msgs.msg import Twist         # 구동 명령 데이터를 publish하기 위해 메세지 형식과 패키지를 import한다.
+from std_msgs.msg import String             # 카메라 색상 데이터를 subscribe하기 위해 메세지 형식과 패키지를 import한다.
+from std_msgs.msg import Int64
+from std_msgs.msg import Float64
+
+WALL_PERCEPTION = 0.45              # 벽을 인식하는 거리를 1.0으로 정의한다.
+LINEAR_VEL = 0.05                   # 선형 속도를 0.22m/s로 정의하는 구간으로, linear.x에 담겨 publish될 수치이다.
+ANGULAR_VEL = 0.2                  # 회전 각속도를 0.3rad/s로 정의한다.
+FRONT_NUM = 0                       # 0 0 정면 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM = 59                       # 59 90 좌측면 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM = 176                     # 176 270 우측면 Lidar 값을 저장하기 위해 정의된 변수이다.
+BACK_NUM = 118                      # 118 180 후면 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM_1 = 166                   # 166 255 우측 후방 Lidar 값을 저장하기 위해 정의된 변수이다.
+RIGHT_NUM_2 = 186                   # 186 285 우측 전방 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM_1 = 69                     # 69 105 좌측 후방 Lidar 값을 저장하기 위해 정의된 변수이다.
+LEFT_NUM_2 = 49                     # 49 75 좌측 전방 Lidar 값을 저장하기 위해 정의된 변수이다.
+SLEEP = 7                           # delay 시간을 정의한다.
+
+TARGET_DISTANCE = 45                # 목표물과 터틀봇의 거리를 나타내는 원 크기를 정의하는 변수이다.  
+TARGET_XPOS = 0                     # 검출된 원의 x좌표 주소를 지정하는 변수이다.
+TARGET_YPOS = 1                     # 검출된 원의 y좌표 주소를 지정하는 변수이다.
+TARGET_RADIUS = 2                   # 검출된 원의 반지름 주소를 지정하는 변수이다.
+CENTER_XPOS = 160                   # 목표물과 터틀봇 사이의 거리를 나타내는 원의 크기를 지정하는 변수이다.
+
+
+class Obstacle():
+    def __init__(self):     # obstacle class를 정의한다.
+        self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)     # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self._mani_pub = rospy.Publisher('mani_pub', String, queue_size=1)  # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self._target_pub = rospy.Publisher('target_pub', String, queue_size=1)  # publisher를 정의해주고, 토픽명, 메세지 타입, 큐사이즈를 설정한다.
+        self.obstacle()     # 생성자 함수를 호출한다.
+        
+    def get_scan(self):      # lidar data에서 direction에 따라 scan filter에 담을 데이터를 저장하고, 반환해주는 함수이다.
+        scan = rospy.wait_for_message('scan', LaserScan)    # subscriber를 설정해주는 구간으로, 토픽명과 메세지 타입을 설정한다.
+        scan_filter = []    # 빈 행렬을 정의한다.
+        scan_filter.extend(scan.ranges)  # scan_filter 행렬 끝에 scan 행렬의 0번에 해당하는 원소를 추가한다.
+
+        for i in range(len(scan_filter)):       # scan_filter의 원소 개수만큼 i를 1씩 증가하여 아래의 구문을 반복 실행한다.  
+            if scan_filter[i] == float('Inf'):  # 만약, 센서값이 infinity일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 3.5             # 해당 센서값을 최대값 3.5m로 설정한다.
+            elif math.isnan(scan_filter[i]):    # 만약, 센서값이 none 값일 경우, 아래의 구문을 실행한다.
+               scan_filter[i] = 0               # 해당 센서값을 최소값 0m로 설정한다.
+
+        return scan_filter      # scan_filter 행렬을 반환한다.
+    
+    def get_finish(self):
+        finish_sub = rospy.wait_for_message('finish_pub', String)
+        finish = finish_sub.data
+
+        return finish
+    
+    def get_figure(self):
+        figure_sub = rospy.wait_for_message('figure_pub', String)
+        figure = figure_sub.data
+
+        return figure
+    
+    def get_target_info(self):      # 검출된 원의 정보를 저장하기 위한 함수이다.
+        detect_target_info = []     # 정보를 저장하기 위한 빈행렬을 정의한다.
+        target_xpos = rospy.wait_for_message('center_xpos', Int64)  # 검출된 원의 x좌표를 변수에 저장한다.
+        target_ypos = rospy.wait_for_message('center_ypos', Int64)  # 검출된 원의 y좌표를 변수에 저장한다.
+        target_radius = rospy.wait_for_message('center_radius', Float64)  # 검출된 원의 반지름을 변수에 저장한다.
+
+        detect_target_info.append(target_xpos.data)     # 저장한 x좌표를 원 정보 행렬에 저장한다.
+        detect_target_info.append(target_ypos.data)     # 저장한 y좌표를 원 정보 행렬에 저장한다.
+        detect_target_info.append(target_radius.data)   # 저장한 반지름을 원 정보 행렬에 저장한다.
+        
+        return detect_target_info       # 원 정보 행렬을 반환한다.
+
+    def pub_cmd(self, Linear, Angle):   # cmd vel 토픽을 publish 해주는 함수이다.
+        twist = Twist()              # 새로운 Twist 메세지 변수를 생성한다.
+        twist.linear.x = Linear      # x축 선형 속도를 정의한 속도로 정의한다.
+        twist.angular.z = Angle      # z축 각속도를 정의한 각속도로 정의한다.
+        self._cmd_pub.publish(twist) # 위에서 정의한 twist 메세지를 publish한다.
+        
+    def pub_target(self, target_comm):
+        string = String()
+        string.data = target_comm
+        self._target_pub.publish(string)  # 저장한 데이터를 publish 한다.
+
+    def pub_mani(self, mani_comm):             # manipulator를 동작할 명령을 publish 해주는 함수이다.
+        string = String()           # 새로운 String 메세지 변수를 생성한다.
+        string.data = mani_comm        # 메세지의 데이터에 "grip"이라는 문구를 저장한다.
+        self._mani_pub.publish(string)  # 저장한 데이터를 publish 한다.
+
+    def obstacle(self):         # lidar 센서값(물체와의 거리)으로 판단하고 행동하는 역할을 수행하는 함수이다.
+        wall_parallel = True      # 벽과의 평형을 확인하기 위한 변수를 정의한다.
+        target_parallel_1 = False   # 원과의 정렬을 확인하기 위한 변수를 정의한다.
+        target_parallel_2 = False   # 원과의 정렬을 확인하기 위한 변수를 정의한다.
+        target_closest = False
+        target_find = False     # 목표 원을 찾았는지 확인하기 위한 변수를 정의한다.
+        finish_flag = False     # 매니퓰레이터 동작을 마쳤는지 확인하기 위한 변수를 정의한다.
+
+        path_method = "left_hand"
+        safe_distance = 0.0
+        distances = []          # 거리값을 저장하기 위해 빈행렬을 정의한다.
+        target_info = []        # 원의 정보를 저장하기 위해 빈행렬을 정의한다.
+        finish = ""             # 매니퓰레이터 동작상태를 저장하기 위한 변수를 정의한다.
+        figure = ""
+
+        while not rospy.is_shutdown():                      # ROS가 구동하는 동안 무한으로 구동하는 반복문이다.
+            distances.extend(self.get_scan())               # 거리값을 subscribe한 데이터로 저장한다.
+            target_info.extend(self.get_target_info())      # 원의 정보를 subscribe한 데이터로 저장한다.
+            
+            rospy.loginfo("\n\n                front : %f\n\nleft: %f                    right: %f\n\n                back  : %f\n",distances[FRONT_NUM], distances[LEFT_NUM], distances[RIGHT_NUM], distances[BACK_NUM])
+            rospy.loginfo("\nparallel: %s\n xpos: %d\n radius: %f\n find: %s\n cir_parallel: %s", wall_parallel, target_info[TARGET_XPOS], target_info[TARGET_RADIUS],target_find, target_parallel_1)
+            rospy.loginfo("\nfinish: %s", finish_flag)
+            rospy.loginfo("%f %f", distances[LEFT_NUM_1], distances[LEFT_NUM_2])
+            # 변수 상황과 거리, 검출 상황을 터미널로 확인하기 위한 구문이다.
+    
+            if (target_find):        # 만약, target_find이 true이면 아래의 구문을 실행한다.
+                if (target_parallel_1):     # 만약, target_parallel_1이 true이면 아래의 구문을 실행한다.
+                    if (target_closest):
+                        if (target_parallel_2):
+                            if (finish_flag):
+                                if finish == "right_put_finish":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_target("object")
+                                    finish_flag = False
+                                    target_parallel_1 = False
+                                    target_parallel_2 = False
+                                    target_find = False
+                                    target_closest = False
+                                    finish = ""
+                                    figure = ""
+                                    path_method = "left_hand"
+                                elif finish == "left_put_finish":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_target("object")
+                                    finish_flag = False
+                                    target_parallel_1 = False
+                                    target_parallel_2 = False
+                                    target_find = False
+                                    target_closest = False
+                                    finish = ""
+                                    figure = ""
+                                    path_method = "right_hand"
+                                elif finish == "back_put_finish":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_target("object")
+                                    finish_flag = False
+                                    target_parallel_1 = False
+                                    target_parallel_2 = False
+                                    target_find = False
+                                    target_closest = False
+                                    finish = ""
+                                    figure = ""
+                                    path_method = "left_hand"
+                                elif finish == "right_hit_finish":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_target("object")
+                                    finish_flag = False
+                                    target_parallel_1 = False
+                                    target_parallel_2 = False
+                                    target_find = False
+                                    target_closest = False
+                                    finish = ""
+                                    figure = ""
+                                    path_method = "right_hand"
+                                elif finish == "left_hit_finish":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_target("object")
+                                    finish_flag = False
+                                    target_parallel_1 = False
+                                    target_parallel_2 = False
+                                    target_find = False
+                                    target_closest = False
+                                    finish = ""
+                                    figure = ""
+                                    path_method = "left_hand"
+                                elif finish == "parking_finish":
+                                    self.pub_cmd(0.0,0.0)  
+                                    rospy.loginfo("Project Finish!") 
+                                else:
+                                    finish_flag = False
+                            else:
+                                if figure == "redcircle":      # 만약, target_grip이 true이면 아래의 구문을 실행한다.
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_mani("right_put")
+                                    rospy.loginfo("\nThis is redcircle")
+                                    finish = self.get_finish()
+                                    finish_flag = True
+                                elif figure == "bluecircle":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_mani("left_put")
+                                    rospy.loginfo("\nThis is bluecircle")
+                                    finish = self.get_finish()
+                                    self.pub_cmd(LINEAR_VEL,0.0) 
+                                    time.sleep(1) 
+                                    finish_flag = True
+                                elif figure == "greencircle":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_mani("back_put")
+                                    rospy.loginfo("\nThis is greencircle")
+                                    finish = self.get_finish()
+                                    self.pub_cmd(LINEAR_VEL,0.0) 
+                                    time.sleep(1) 
+                                    finish_flag = True
+                                elif figure == "redrectangle":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_cmd(LINEAR_VEL,0.0)
+                                    time.sleep(3) 
+                                    self.pub_cmd(0.0,0.0)
+                                    self.pub_mani("left_hit")
+                                    rospy.loginfo("\nThis is redrectangle")
+                                    finish = self.get_finish()
+                                    finish_flag = True
+                                elif figure == "bluerectangle":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_cmd(LINEAR_VEL,0.0)
+                                    time.sleep(3) 
+                                    self.pub_cmd(0.0,0.0)
+                                    self.pub_mani("right_hit")
+                                    rospy.loginfo("\nThis is bluerectangle")
+                                    finish = self.get_finish()
+                                    finish_flag = True
+                                elif figure == "greenrectangle":
+                                    self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                    self.pub_mani("mid_hit")
+                                    rospy.loginfo("\nThis is greenrectangle")
+                                    finish = self.get_finish()
+                                    self.pub_cmd(LINEAR_VEL,0.0)
+                                    time.sleep(3)
+                                    self.pub_cmd(0.0,0.0) 
+                                    self.pub_mani("parking")
+                                    finish = self.get_finish()
+                                    finish_flag = True
+                        else:
+                            if target_info[TARGET_XPOS] in range(CENTER_XPOS-1, CENTER_XPOS+1):  # 만약, 검출된 원의 x좌표가 중심 x좌표 -2~+2 범위내에 있으면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                                self.pub_target("What Figure")
+                                figure = self.get_figure()
+                                target_parallel_2 = True    # target_parallel_1 변수를 True로 정의한다.
+                            elif target_info[TARGET_XPOS] == 0:     # 만약, 검출 원의 x좌표가 0이라면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0,0.0)   # 정지 상태를 publish한다.
+                            elif target_info[TARGET_XPOS] < CENTER_XPOS:    # 만약, 검출 원의 x좌표가 중심 x좌표보다 작다면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0, ANGULAR_VEL*0.1)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                            elif target_info[TARGET_XPOS] > CENTER_XPOS:    # 만약, 검출 원의 x좌표가 중심 x좌표보다 크다면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0, -ANGULAR_VEL*0.1)  # 정지 상태에서 왼쪽으로 회전하는 명령을 publish한다.
+                    else:                   # 그렇지 않다면 아래의 구문을 실행한다.
+                        if round(target_info[TARGET_RADIUS]) in range(TARGET_DISTANCE-1, TARGET_DISTANCE+1):  # 만약, 검출된 원의 반지름이 목표 반지름 -2~+2 범위내에 있으면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                            target_closest = True
+                        elif target_info[TARGET_RADIUS] == 0:   # 만약, 검출된 원의 반지름이 0이면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,0.0)           # 정지 상태를 publish한다.
+                        elif target_info[TARGET_RADIUS] < TARGET_DISTANCE: # 만약, 검출된 원의 반지름이 목표 반지름보다 작다면 아래의 구문을 실행한다.
+                            if abs(target_info[TARGET_RADIUS] - TARGET_DISTANCE) > 10.0: 
+                                self.pub_cmd(LINEAR_VEL*0.5,0.0)       # 정의한 선형 속도를 publish한다.
+                            else:
+                                self.pub_cmd(LINEAR_VEL*0.1,0.0)       # 정의한 선형 속도를 publish한다.
+                        elif target_info[TARGET_RADIUS] > TARGET_DISTANCE: # 만약, 검출된 원의 반지름이 목표 반지름보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(-LINEAR_VEL*0.1,0.0)       # 정의한 선형 속도를 publish한다.
+                else:                   # 그렇지 않다면 아래의 구문을 실행한다.
+                    if target_info[TARGET_XPOS] in range(CENTER_XPOS-1, CENTER_XPOS+1):  # 만약, 검출된 원의 x좌표가 중심 x좌표 -2~+2 범위내에 있으면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,0.0)   # 정지 상태를 publish한다.
+                        target_parallel_1 = True    # target_parallel_1 변수를 True로 정의한다.
+                    elif target_info[TARGET_XPOS] == 0:     # 만약, 검출 원의 x좌표가 0이라면 아래의 구문을 실행한다.
+                        self.pub_cmd(0.0,0.0)   # 정지 상태를 publish한다.
+                    elif target_info[TARGET_XPOS] < CENTER_XPOS:    # 만약, 검출 원의 x좌표가 중심 x좌표보다 작다면 아래의 구문을 실행한다.
+                        if abs(target_info[TARGET_XPOS] - CENTER_XPOS) > 20: #
+                            self.pub_cmd(0.0, ANGULAR_VEL*0.3)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                        else:
+                            self.pub_cmd(0.0, ANGULAR_VEL*0.1)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                    elif target_info[TARGET_XPOS] > CENTER_XPOS:    # 만약, 검출 원의 x좌표가 중심 x좌표보다 크다면 아래의 구문을 실행한다.
+                        if abs(target_info[TARGET_XPOS] - CENTER_XPOS) > 20: #
+                            self.pub_cmd(0.0, -ANGULAR_VEL*0.3)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                        else:
+                            self.pub_cmd(0.0, -ANGULAR_VEL*0.1)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+            else:                   # 그렇지 않다면 아래의 구문을 실행한다.
+                if target_info[TARGET_RADIUS] > 15.0: # 만약, 검출된 색상이 목표 생상과 일치하고, 검출 원의 반지름이 100이상, finsish_flag가 False라면 아래의 구문을 실행한다.
+                    self.pub_cmd(0.0,0.0)   # 정지 상태를 publish한다.
+                    target_find = True      # target_find 변수를 True로 정의한다.
+                else:           # 그렇지 않다면 아래의 구문을 실행한다.
+                    if (wall_parallel) and (path_method == "left_hand"):   # 만약, wall_parallel이 true이면 아래의 구문을 실행한다.
+                        if distances[LEFT_NUM_2] > WALL_PERCEPTION + 0.5:  # 만약, 우측 전방 라이다 값이 WALL_PERCEPTION+1보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,(distances[LEFT_NUM_2]-distances[LEFT_NUM_1])*0.2)     # 벽면을 따라가며 직진 주행하는 명령을 publish한다. 
+                        elif distances[FRONT_NUM] > WALL_PERCEPTION:    # 만약, 전방 라이다 값이 WALL_PERCEPTION보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,(distances[LEFT_NUM_2]-distances[LEFT_NUM_1])*2.0 + (distances[LEFT_NUM] - WALL_PERCEPTION)*0.5) # (WALL_PERCEPTION-distances[RIGHT_NUM])*0.5벽면을 따라가며 직진 주행하는 명령을 publish한다. 
+                        else:   # 그렇지 않다면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,-ANGULAR_VEL)  # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                            time.sleep(SLEEP)               # 정의한 시간만큼 딜레이를 준다.
+                            wall_parallel = False           # wall_parallel 변수를 false로 정의한다.
+                    elif (wall_parallel) and (path_method == "right_hand"):
+                        if distances[RIGHT_NUM_2] > WALL_PERCEPTION + 0.5:  # 만약, 우측 전방 라이다 값이 WALL_PERCEPTION+1보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,(distances[RIGHT_NUM_1]-distances[RIGHT_NUM_2])*0.2)     # 벽면을 따라가며 직진 주행하는 명령을 publish한다. 
+                        elif distances[FRONT_NUM] > WALL_PERCEPTION:    # 만약, 전방 라이다 값이 WALL_PERCEPTION보다 크다면 아래의 구문을 실행한다.
+                            self.pub_cmd(LINEAR_VEL,(distances[RIGHT_NUM_1]-distances[RIGHT_NUM_2])*2.0 + (WALL_PERCEPTION - distances[RIGHT_NUM])*0.5) # (WALL_PERCEPTION-distances[RIGHT_NUM])*0.5벽면을 따라가며 직진 주행하는 명령을 publish한다. 
+                        else:   # 그렇지 않다면 아래의 구문을 실행한다.
+                            self.pub_cmd(0.0,ANGULAR_VEL)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                            time.sleep(SLEEP)               # 정의한 시간만큼 딜레이를 준다.
+                            wall_parallel = False           # wall_parallel 변수를 false로 정의한다.
+                    else:   # 그렇지 않다면 아래의 구문을 실행한다.
+                        if (path_method == "left_hand"):
+                            if distances[LEFT_NUM_1] <= distances[LEFT_NUM_2]:  # 우측 전방 거리값이 우측 후방 거리값보다 크거나 같다면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0,0.0)       # 정지 상태를 publish한다.
+                                wall_parallel = True        # wall_parallel 변수를 true로 정의한다.
+                            else:  # 그렇지 않다면, 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0, -ANGULAR_VEL*0.5)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+                        elif (path_method == "right_hand"):
+                            if distances[RIGHT_NUM_1] <= distances[RIGHT_NUM_2]:  # 우측 전방 거리값이 우측 후방 거리값보다 크거나 같다면 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0,0.0)       # 정지 상태를 publish한다.
+                                wall_parallel = True        # wall_parallel 변수를 true로 정의한다.
+                            else:  # 그렇지 않다면, 아래의 구문을 실행한다.
+                                self.pub_cmd(0.0, ANGULAR_VEL*0.5)   # 정지 상태에서 오른쪽으로 회전하는 명령을 publish한다.
+            distances.clear()   # 거리값 행렬을 초기화한다.
+            target_info.clear() # 원정보 행렬을 초기화한다.
+
+def main():     # 메인 구동문이다.
+    rospy.init_node('ROS_project_path')     # ROS 노드 'ROS_HW10_mani_path'을 초기화한다.
+    try:        # 예외를 처리하기 위한 구문이다.
+        obstacle = Obstacle()               # Obstacle 생성자를 호출한다.
+    except rospy.ROSInterruptException:     # 예외가 발생하면, except 구문이 실행된다.
+        pass    # 예외 처리를 하지 않고, 넘어가도록 하는 예약어이다.
+
+if __name__ == '__main__':      # 다른 코드에서 import되었을 시에는 실행되지 않고, 이 코드에서만 실행할 수 있도록 한다.
+    main()      # main 문을 구동한다.

@@ -1,0 +1,40 @@
+<launch>
+    <param name="robot_description" command="cat $(find mero_bringup)/urdf/mero_robot.urdf"/>
+    <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher">
+        <param name="use_gui" value="true"/>
+        <param name="rate" value="50"/>
+    </node>
+
+    <!-- <include file="$(find mero_bringup)/launch/mero_bringup.launch"/> -->
+
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+        <param name="publish_frequency" type="double" value="50.0" />
+    </node>
+
+    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization" clear_params="true">
+        <remap from="lidar" to="/scan"/>
+        <remap from="odom" to="/odom"/>
+        <remap from="imu" to="/imu/data"/>
+        <rosparam command="load" file="$(find mero_bringup)/config/ekf_localization.yaml"/>
+    </node>
+
+    <include file="$(find mero_bringup)/launch/move_base.launch">
+        <arg name="move_forward_only" value="true"/>
+    </include>
+
+    <node pkg="cartographer_ros" type="cartographer_node" name="cartographer_node" 
+        args="-configuration_directory $(find mero_bringup)/config
+              -configuration_basename $mero.lua"
+        output="screen">
+        <remap from="scan" to="scan"/>
+    </node>
+
+    <node pkg="cartographer_ros" type="cartographer_occupancy_grid_node"
+        name="cartographer_occupancy_grid_node" 
+        args="-resolution 0.02" />
+
+    <node pkg="tf" type="static_transform_publisher" name="lidar_link_to_laser_broadcaster" args="0 0 0 0 0 0 lidar_link laser 100" />
+    <node pkg="tf" type="static_transform_publisher" name="imu_link_to_imu_broadcaster" args="0 0 0 0 0 0 imu_link imu 100" />
+    <node pkg="tf" type="static_transform_publisher" name="odom_to_base_link" args="0 0 0 0 0 0 odom base_link 100"/>
+
+</launch>
